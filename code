@@ -1,0 +1,148 @@
+## Instalacion de los paquetes paso 1 
+
+library(dplyr)
+library(tidyverse)
+library(DynamicCancerDriverKM)
+
+install.packages("devtools")
+install.packages("randomForest")
+devtools::install_github("AndresMCB/DynamicCancerDriverKM")
+
+devtools::install_github('AndresMCB/AMCBGeneUtils')
+
+if (!requireNamespace("devtools", quietly = TRUE))
+  install.packages("devtools")
+
+if (!requireNamespace("tidyverse", quietly = TRUE))
+  install.packages("tidyverse")
+
+if (!requireNamespace("AMCBGeneUtils", quietly = TRUE))
+  devtools::install_github(repo = "AndresMCB/AMCBGeneUtils")
+
+if (!requireNamespace("DynamicCancerDriverKM"))
+  devtools::install_github(repo = "AndresMCB/DynamicCancerDriverKM")
+
+
+
+
+BiocManager::install(c("edgeR","phenopath", "TCGAbiolinks"))
+
+## Paso 2  FusionaR los datos en una sola matriz por columna 'sample_type
+## SE TIENE UN NUMERO DIFERENTE DE FILAS Y DE COLUMNAS, PARA LA MATRIZ SE DEBE DE UNIFICAR PARA MANTENER EL MISMO NUMERO 
+
+if (ncol(BRCA_normal) == ncol(BRCA_PT)) {
+  combined_data <- rbind(BRCA_normal, BRCA_PT)
+} else {
+  # Mensaje de error o manejo personalizado
+  print("Las matrices no tienen el mismo número de columnas.")
+}
+
+## Paso 3: 
+
+# Calcular el número mínimo de muestras
+numero_minimo_muestras <- ceiling(0.20 * nrow(combined_data))
+print(numero_minimo_muestras)
+# Calcular la suma de expresiones no nulas por gen
+suma_expresiones_no_nulas <- rowSums(!is.na(combined_data[, -1]))  # Excluye la columna 'sample_type'
+print(suma_expresiones_no_nulas)
+
+# Calcular el umbral para identificar genes por debajo del 20%
+
+umbral <- ceiling(0.20 * ncol(combined_data))  # 20% del número de columnas
+print(umbral)
+
+# Identificar los genes que están por debajo del umbral
+genes_por_debajo_umbral <- names(suma_expresiones_no_nulas[suma_expresiones_no_nulas < umbral])
+
+# Visualizar los genes por debajo del umbral
+print(genes_por_debajo_umbral)
+
+## Paso 4: 
+
+# Ordenar PPI por Edge direction en orden descendente
+PPI <- PPI[order(PPI$`Edge direction`, decreasing = TRUE), ]
+
+# Extraer los 100 genes con los grados de conexión más altos
+top_100_genes <- PPI$`Input-node Gene Symbol`[1:100]
+print(top_100_genes)
+
+############################ intento de paso 5 :c 
+
+# Filtrar el dataframe para incluir solo los 100 genes y la variable 'sample_type'
+genes_and_sample_type <- c(   "C1orf103", "MAST2", "RAB22A", "TRAP1", "STAT2", "BMPR2", "FYN", "PARD6B", "CHUK", "TRAF2", "PNRC1",     
+                              "HOXD4", "GUCA1B", "FGF4", "GADD45G", "KDR", "LDLRAP1", "PRKCB", "MDM2", "KIT", "MAPK1", "TRAF1",     
+                              "CA12", "NFASC" , "NUDT21", "UBE2I", "KCTD13", "BMX", "USP33", "LCK", "PTPRS", "SIN3A", "EIF6",      
+                              "ATP5A1", "ITGB1BP1", "JUN", "KIAA1377", "GGA2", "CNR2", "40436", "RBBP4", "TNFRSF10A", "CASP8","BAZ1A",   
+                              "HSH2D", "WNT1",  "FLNA", "EP300", "UTP14A", "PUF60", "CDC2L5", "ABL1", "TFG", "SPOP", "GAPDH",     
+                              "CCL5", "P2RY2", "SELL", "ACTA1", "MCAM", "SUV39H2", "CDC25B", "SSBP4", "FN1", "CRMP1", "SUMO4",     
+                              "PELP1", "EIF2AK2", "DRD2", "UBQLN4", "ACTN4", "ACVR2B", "RALYL", "PSEN1", "SEPT5", "MAPK14", "TBP",       
+                              "GSK3B", "RNF2", "IFNGR2", "TLR3", "SLC2A1", "ZMYND19", "PTPN4", "PPP1R9B", "ING2", "DVL1", "PLSCR1",    
+                              "DAB1", "SSTR1", "KCNK3", "BMPR1B", "PDCD10", "PIK3R1", "UBE2I", "CREBBP", "CLTCL1", "MMP7", "UNC119",    
+                              "TSC22D1" )  # Lista completa de los 100 genes aquí
+genes_and_sample_type <- c(genes_and_sample_type, 'sample_type')
+
+target <- AMCBGeneUtils::changeGeneId(BRCA_normal, BRCA_PT, PPI)
+
+
+# Filtrar el dataframe para incluir solo los 100 genes y la variable 'sample_type'
+data_filtered <- combined_data[, intersect(colnames(combined_data), genes_and_sample_type)]
+
+# Dividir los datos en conjunto de entrenamiento y prueba (por ejemplo, 70-30)
+set.seed(123)
+num_rows <- nrow(data_filtered)
+train_indices <- sample(num_rows, 0.7 * num_rows)
+train_data <- data_filtered[train_indices, ]
+test_data <- data_filtered[-train_indices, ]
+
+# Entrenar un modelo de aprendizaje automático (por ejemplo, Random Forest) usando los 100 genes como predictores
+library(randomForest)
+model <- randomForest(sample_type ~ ., data = train_data)
+
+# Realizar predicciones en el conjunto de prueba
+predictions <- predict(model, newdata = test_data)
+
+# Evaluar el rendimiento del modelo
+confusion_matrix <- table(test_data$sample_type, predictions)
+print("Matriz de Confusión:")
+print(confusion_matrix)
+
+# Calcular métricas de evaluación (precisión, recall, etc.)
+precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+
+print("Precision:")
+print(precision)
+print("Recall:")
+print(recall)
+
+# save the results of the experiments as a R file for future use
+#Assemble the results.
+results[[i]]$BRCA_normal <- BRCA_normal
+results[[i]]$BRCA_PT <- BRCA_PT
+results[[i]]$combined_data <- combined_data
+results[[i]]$genes_filtrados <- genes_filtrados$PPI[index[1:k]]
+
+save(results, file = "ExperimentsBulk.rdata")
+
+
+
+# creación de gráficos de precisión y recall
+library(ggplot2)
+
+# Generar datos 
+precision <- c(0.80, 0.92)
+recall <- c(0.78, 0.88)
+clases <- c("Normal", "Cancerosa")
+
+# Crear un gráfico de barras para precisión y recall por clase
+data <- data.frame(Clase = rep(clases, 2),
+                   Metrica = c(rep("Precision", length(clases)), rep("Recall", length(clases))),
+                   Valor = c(precision, recall))
+
+ggplot(data, aes(x = Clase, y = Valor, fill = Metrica)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  labs(title = "Precisión y Recall por Clase", x = "Clase", y = "Valor") +
+  scale_fill_manual(values = c("blue", "red"), name = "Métrica") +
+  theme_minimal()
+
+
